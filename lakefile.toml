@@ -10,6 +10,11 @@ moreServerArgs = ["--tstack=400000"]
 name = "ExArray"
 path = "ExArray"
 
+[[require]]
+name = "srtfp"
+git = "https://github.com/srtfp/srtfp.git"
+rev = "main"
+
 [[lean_lib]]
 name = "Veir"
 root = "Veir"

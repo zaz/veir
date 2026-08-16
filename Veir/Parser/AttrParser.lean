@@ -2,6 +2,8 @@ module
 
 public import Veir.Parser.Parser
 public import Veir.IR.Attribute
+public import Srtfp.Clinger
+public import Srtfp.Text
 
 public section
 
@@ -166,20 +168,95 @@ def parseOptionalStringAttr : AttrParserM (Option StringAttr) := do
   return some (StringAttr.mk bytes)
 
 /--
-Parse a float attribute, if present.
-Only `1.0 : f64` is supported; the value is stored as Lean's `Float`.
+Convert the byte slice of a `floatLit` token (`[0-9]+ '.' [0-9]* ([eE][+-]?[0-9]+)?`)
+into the exact decimal value `(-1)^sign × significand × 10^exponent` it denotes,
+using srtfp's MLIR-dialect literal parser. Returns `none` if the bytes do not
+have the lexer-guaranteed shape.
 -/
-def parseOptionalFloatAttr : AttrParserM (Option FloatAttr) := do
-  let some tok ← parseOptionalToken .floatLit | return none
-  let str := String.fromUTF8! (tok.slice.of (← getThe ParserState).input)
-  if str ≠ "1.0" then
-    throwAtCurrentPos s!"unsupported floating-point literal '{str}', only '1.0 : f64' is supported"
+def floatLitToDecimal (sign : Bool) (bytes : ByteArray) : Option Srtfp.Decimal := do
+  Srtfp.Text.parseMag .mlir sign (← String.fromUTF8? bytes).toList
+
+/--
+Parse the remainder of a float attribute (`: type`), given the already-consumed
+sign and float literal token. The value is correctly rounded to the nearest
+binary64, matching MLIR's parsing semantics.
+-/
+def parseFloatAttrFromToken (startPos : Location) (isNegative : Bool) (tok : Token) :
+    AttrParserM FloatAttr := do
+  let bytes := tok.slice.of (← getThe ParserState).input
+  let some dec := floatLitToDecimal isNegative bytes
+    | throwAt startPos s!"internal error: malformed floating-point literal '{String.fromUTF8! bytes}'"
   parsePunctuation ":"
   let some floatType ← parseOptionalFloatType
     | throwAtCurrentPos "float type expected after ':' in float attribute"
   if floatType.bitwidth ≠ 64 then
     throwAtCurrentPos "unsupported float type, only f64 is supported"
-  return some (Veir.FloatAttr.mk 1.0 floatType)
+  return FloatAttr.mk (Srtfp.Clinger.ofDecimal dec) floatType
+
+/--
+Parse a float attribute, if present.
+A float attribute is an optionally negated decimal or scientific float literal
+followed by `: type`, e.g. `-4.2 : f64` or `1.5e-3 : f64`; the value is stored
+as Lean's `Float`.
+-/
+def parseOptionalFloatAttr : AttrParserM (Option FloatAttr) := do
+  let startPos ← getPos
+  let isNegative := Option.isSome (← parseOptionalToken .minus)
+  let some tok ← parseOptionalToken .floatLit
+    | if isNegative then throwAtCurrentPos "expected floating-point literal after '-'"
+      else return none
+  return some (← parseFloatAttrFromToken startPos isNegative tok)
+
+/--
+  Parse an integer or float attribute, if present.
+
+  As in MLIR, the attribute kind is decided by the type after the colon: a
+  literal with an integer type is an integer attribute, a float literal with a
+  float type is a float attribute, and a hexadecimal integer literal with a
+  float type denotes the float with that raw bit pattern, e.g.
+  `0x3FF0000000000000 : f64` (the form MLIR prints for NaN and infinity).
+-/
+def parseOptionalNumberAttr : AttrParserM (Option Attribute) := do
+  if (← parseOptionalKeyword "false".toByteArray) then
+    return some (Attribute.integerAttr (IntegerAttr.mk 0 (IntegerType.mk 1)))
+  if (← parseOptionalKeyword "true".toByteArray) then
+    return some (Attribute.integerAttr (IntegerAttr.mk 1 (IntegerType.mk 1)))
+
+  let startPos ← getPos
+  let isNegative := Option.isSome (← parseOptionalToken .minus)
+
+  if let some tok ← parseOptionalToken .floatLit then
+    return some (Attribute.floatAttr (← parseFloatAttrFromToken startPos isNegative tok))
+
+  let some intToken ← parseOptionalToken .intLit
+    | if isNegative then throwAtCurrentPos "expected integer or floating-point literal after '-'"
+      else return none
+
+  let slice := intToken.slice.of (← getThe ParserState).input
+  let isHex := slice.size > 2 && slice.getD 1 0 == 'x'.toUInt8
+  let value ←
+    match (if isHex then slice.hexToNat? else (String.fromUTF8? slice).bind String.toNat?) with
+    | some value => pure value
+    | none => throwAt startPos "internal error: failed converting an integer literal"
+  parsePunctuation ":"
+
+  if let some integerType ← parseOptionalIntegerType then
+    let value := if isNegative then Int.negOfNat value else Int.ofNat value
+    return some (Attribute.integerAttr (IntegerAttr.mk value integerType))
+
+  let some floatType ← parseOptionalFloatType
+    | throwAtCurrentPos "integer or float type expected after ':'"
+  -- Raw bit-pattern form: the literal must be hexadecimal, non-negated, and
+  -- fit in the type's width, as in MLIR.
+  if isNegative then
+    throwAt startPos "hexadecimal float literal should not have a leading minus"
+  if !isHex then
+    throwAt startPos "expected floating point literal; add a trailing dot to make the literal a float"
+  if floatType.bitwidth ≠ 64 then
+    throwAtCurrentPos "unsupported float type, only f64 is supported"
+  if value ≥ 2 ^ 64 then
+    throwAt startPos "hexadecimal float constant out of range for type"
+  return some (Attribute.floatAttr (FloatAttr.mk (Float.ofBits (UInt64.ofNat value)) floatType))
 
 /--
   Parse a string attribute.
@@ -935,10 +1012,8 @@ partial def parseOptionalAttribute : AttrParserM (Option Attribute) := do
     return some locationAttr
   else if let some type ← parseOptionalType then
     return some type.val
-  else if let some integerAttr ← parseOptionalIntegerAttr then
-    return some integerAttr
-  else if let some floatAttr ← parseOptionalFloatAttr then
-    return some floatAttr
+  else if let some numberAttr ← parseOptionalNumberAttr then
+    return some numberAttr
   else if let some stringAttr ← parseOptionalStringAttr then
     return some stringAttr
   else if let some denseArrayAttr ← parseOptionalDenseArrayAttr then
