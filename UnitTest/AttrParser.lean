@@ -192,6 +192,49 @@ without an exact short decimal form, e.g. NaN and infinity. -/
 #assert expectFloatBits "0x7FF0000000000001 : f64" 0x7FF8000000000000
 #assert expectFloatBits "0xFFF8000000000123 : f64" 0x7FF8000000000000
 
+/-! ### Float attribute printing (MLIR `printFloatValue` emulation)
+
+Expected strings are byte-identical to `mlir-opt --mlir-print-op-generic`
+output for the same bit patterns (differentially validated against LLVM 24 on
+227k+ patterns; see the PR description).
+-/
+
+/-- The printed form of the float attribute with the given bit pattern. -/
+def printBits (bits : UInt64) : String :=
+  ToString.toString (FloatAttr.mk (Float.ofBits bits) (FloatType.mk 64))
+
+/-- Parse-print round trip: `s` parses to bits that print back as `s`. -/
+def expectRoundTrip (s : String) : Bool :=
+  match testOptionalAttr s with
+  | .ok (some (.floatAttr a)) => ToString.toString a = s
+  | _ => false
+
+/- Tier 1: 6 significant digits when that round-trips. -/
+#assert printBits 0x3FF0000000000000 = "1.000000e+00 : f64"
+#assert printBits 0xBFF0000000000000 = "-1.000000e+00 : f64"
+#assert printBits 0x0000000000000000 = "0.000000e+00 : f64"
+#assert printBits 0x8000000000000000 = "-0.000000e+00 : f64"
+#assert printBits 0x40091EB851EB851F = "3.140000e+00 : f64"
+#assert printBits 0x42174876E8000000 = "2.500000e+10 : f64"
+#assert printBits 0x0000000000000001 = "4.940660e-324 : f64"
+/- Tier 2: 17-digit natural precision when tier 1 loses bits. -/
+#assert printBits 0x3FB999999999999A = "1.000000e-01 : f64"
+#assert printBits 0x40B780F38304D715 = "6016.9512179398635 : f64"
+#assert printBits 0x7FEFFFFFFFFFFFFF = "1.7976931348623157E+308 : f64"
+/- Tier 3: raw bits for NaN, infinities, and 17-digit forms without a '.'
+   (the value below is 123456789000.0, whose natural-precision form is the
+   dotless "123456789000"). -/
+#assert printBits 0x7FF8000000000000 = "0x7FF8000000000000 : f64"
+#assert printBits 0x7FF0000000000000 = "0x7FF0000000000000 : f64"
+#assert printBits 0xFFF0000000000000 = "0xFFF0000000000000 : f64"
+#assert printBits 0x423CBE991A080000 = "0x423CBE991A080000 : f64"
+/- Print-parse round trips through the full attribute pipeline. -/
+#assert expectRoundTrip "1.000000e+00 : f64"
+#assert expectRoundTrip "-2.500000e+00 : f64"
+#assert expectRoundTrip "6016.9512179398635 : f64"
+#assert expectRoundTrip "0x7FF8000000000000 : f64"
+#assert expectRoundTrip "4.940660e-324 : f64"
+
 /-! ### Float attribute errors -/
 
 #assert expectErrorAttr "5 : f64"
