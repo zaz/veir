@@ -2,6 +2,7 @@ module
 
 import Veir.ForLean
 public import Lean.Elab.Command
+public import Veir.IR.FloatPrinter
 public import Std.Data.Iterators.Producers.Array
 
 /-!
@@ -1019,7 +1020,7 @@ instance : ToString IntegerAttr where
   toString attr := s!"{attr.value} : {attr.type}"
 
 instance : ToString FloatAttr where
-  toString attr := s!"{attr.value} : {attr.type}"
+  toString attr := s!"{FloatPrinter.shortestFloatString attr.value.toBits} : {attr.type}"
 
 instance : ToString RegisterType where
   toString type :=

@@ -218,6 +218,49 @@ without an exact short decimal form, e.g. NaN and infinity. -/
 #assert expectFloatBits "0x7FF0000000000001 : f64" 0x7FF8000000000000
 #assert expectFloatBits "0xFFF8000000000123 : f64" 0x7FF8000000000000
 
+/-! ### Float attribute printing
+
+Float attributes print as the shortest round-trip decimal (Schubfach), with
+raw-bit hex for NaN and the infinities.
+-/
+
+/-- The printed form of the float attribute with the given bit pattern. -/
+def printBits (bits : UInt64) : String :=
+  ToString.toString (FloatAttr.mk (Float.ofBits bits) (FloatType.mk 64))
+
+/-- Parse-print round trip: `s` parses to bits that print back as `s`. -/
+def expectRoundTrip (s : String) : Bool :=
+  match testOptionalAttr s with
+  | .ok (some (.floatAttr a)) => ToString.toString a = s
+  | _ => false
+
+/- Shortest round-trip form (the default printer). -/
+#assert printBits 0x3FF0000000000000 = "1.0 : f64"
+#assert printBits 0xBFF0000000000000 = "-1.0 : f64"
+#assert printBits 0x0000000000000000 = "0.0 : f64"
+#assert printBits 0x8000000000000000 = "-0.0 : f64"
+#assert printBits 0x40091EB851EB851F = "3.14 : f64"
+#assert printBits 0x3FB999999999999A = "0.1 : f64"
+#assert printBits 0x40B780F38304D715 = "6016.951217939863 : f64"
+#assert printBits 0x423CBE991A080000 = "123456789000.0 : f64"
+#assert printBits 0x7FEFFFFFFFFFFFFF = "1.7976931348623157e308 : f64"
+#assert printBits 0x0000000000000001 = "5.0e-324 : f64"
+/- Positional/scientific switch mirrors Python's repr thresholds. -/
+#assert printBits 0x3F1A36E2EB1C432D = "0.0001 : f64"
+#assert printBits 0x3EE4F8B588E368F1 = "1.0e-5 : f64"
+#assert printBits 0x430C6BF526340000 = "1000000000000000.0 : f64"
+#assert printBits 0x4341C37937E08000 = "1.0e16 : f64"
+/- NaN and the infinities print as raw bits, as in MLIR. -/
+#assert printBits 0x7FF8000000000000 = "0x7FF8000000000000 : f64"
+#assert printBits 0x7FF0000000000000 = "0x7FF0000000000000 : f64"
+#assert printBits 0xFFF0000000000000 = "0xFFF0000000000000 : f64"
+/- Print-parse round trips through the full attribute pipeline. -/
+#assert expectRoundTrip "1.0 : f64"
+#assert expectRoundTrip "-2.5 : f64"
+#assert expectRoundTrip "6016.951217939863 : f64"
+#assert expectRoundTrip "0x7FF8000000000000 : f64"
+#assert expectRoundTrip "5.0e-324 : f64"
+
 /-! ### Float attribute errors -/
 
 #assert expectErrorAttr "5 : f64"
