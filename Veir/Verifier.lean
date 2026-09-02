@@ -113,6 +113,144 @@ private def WfIRContext.graphRegionsHaveAtMostOneBlock (ctx : WfIRContext OpCode
     else
       true
 
+/-!
+## Whole-context verification
+
+Verification runs in three phases. Later phases assume the invariants checked
+by earlier ones:
+
+1. *Structural*: block successors stay within their region, and graph regions
+   hold a single block. The dominance analysis assumes both.
+2. *Local*: the local invariants of every operation, the terminator and
+   entry-block rules of every block, LLVM global symbols, and PDL pattern
+   bodies. These checks assume nothing from one another.
+3. *Dominance*: every operand use is dominated by its definition.
+
+`verifyAll` reports every failure of the first phase that has any, in source
+order, and nothing from the phases after it, whose results could be spurious
+once an earlier invariant is broken. `verify` is the first of those messages,
+or success when there are none. The two therefore always agree on whether the
+IR is valid, and proofs about `verify` only ever need its structural phase.
+-/
+
+/--
+A verification failure, tagged with the node it concerns so that a report can
+be sorted into source order.
+-/
+private structure Diagnostic where
+  node : IRNode
+  /-- Orders several failures at one node: by check within the local phase, by
+      operand within the dominance phase. -/
+  index : Nat
+  message : String
+
+/--
+Positions of the nodes in a pre-order walk of the tree under a root operation,
+as a printer would visit them. Nodes outside that tree get no position and
+sort after every node inside it.
+-/
+private structure SourceOrder where
+  positions : Std.HashMap IRNode Nat
+  /-- Number of positions assigned so far. -/
+  count : Nat
+
+/--
+The blocks of a region, first to last. The walk is bounded by the number of
+blocks in the context, so it terminates even on a malformed chain.
+-/
+private def RegionPtr.blocksInOrder (region : RegionPtr) (ctx : IRContext OpCode) :
+    List BlockPtr := Id.run do
+  let mut chain := #[]
+  let mut current := (region.get! ctx).firstBlock
+  for _ in [0:ctx.blocks.size] do
+    let some block := current | break
+    chain := chain.push block
+    current := (block.get! ctx).next
+  return chain.toList
+
+/-- The operations of a block, first to last; bounded like `RegionPtr.blocksInOrder`. -/
+private def BlockPtr.opsInOrder (block : BlockPtr) (ctx : IRContext OpCode) :
+    List OperationPtr := Id.run do
+  let mut chain := #[]
+  let mut current := (block.get! ctx).firstOp
+  for _ in [0:ctx.operations.size] do
+    let some op := current | break
+    chain := chain.push op
+    current := (op.get! ctx).next
+  return chain.toList
+
+/--
+Number the nodes on the worklist and their descendants in pre-order. `fuel`
+bounds the number of steps, which keeps the walk total: every step pops one
+node and a node is numbered at most once, so with fuel of at least the number
+of nodes a well-formed tree is numbered completely, and a malformed one merely
+leaves some nodes unnumbered.
+-/
+private def SourceOrder.walk (ctx : IRContext OpCode) :
+    Nat → List IRNode → SourceOrder → SourceOrder
+  | 0, _, order => order
+  | _, [], order => order
+  | fuel + 1, node :: rest, order =>
+    if order.positions.contains node then walk ctx fuel rest order else
+    let order : SourceOrder :=
+      { positions := order.positions.insert node order.count, count := order.count + 1 }
+    let children : List IRNode :=
+      match node with
+      | .operation op => (op.get! ctx).regions.toList.map .region
+      | .region region => (region.blocksInOrder ctx).map .block
+      | .block block => (block.opsInOrder ctx).map .operation
+    walk ctx fuel (children ++ rest) order
+
+/-- The source order of the tree under `root`, see `SourceOrder`. -/
+private def WfIRContext.sourceOrder (ctx : WfIRContext OpCode) (root : OperationPtr) :
+    SourceOrder :=
+  let nodes := ctx.raw.operations.size + ctx.raw.blocks.size + ctx.raw.regions.size
+  SourceOrder.walk ctx.raw (nodes + 1) [.operation root] { positions := ∅, count := 0 }
+
+/-- The position of `node`; a node the walk did not reach sorts after all it did. -/
+private def SourceOrder.position (order : SourceOrder) (node : IRNode) : Nat :=
+  order.positions.getD node (order.count + nodeId node)
+where
+  nodeId : IRNode → Nat
+    | .operation ptr => ptr.id
+    | .block ptr => ptr.id
+    | .region ptr => ptr.id
+
+/--
+The messages of `diagnostics` in source order. The walk that defines that
+order is only done when there is something to sort, so a successful
+verification never pays for it.
+-/
+private def Diagnostic.messages (ctx : WfIRContext OpCode) (root : OperationPtr)
+    (diagnostics : Array Diagnostic) : Array String :=
+  if diagnostics.isEmpty then #[] else
+  let order := ctx.sourceOrder root
+  let lt (a b : Diagnostic) : Bool :=
+    let (pa, pb) := (order.position a.node, order.position b.node)
+    pa < pb || (pa = pb && (a.index < b.index || (a.index = b.index && a.message < b.message)))
+  (diagnostics.qsort lt).map (·.message)
+
+/-- Collects the diagnostics of one phase. -/
+private abbrev Report := StateM (Array Diagnostic)
+
+/-- Record a failure at `node`; `index` orders failures of the same node. -/
+private def report (node : IRNode) (index : Nat) (message : String) : Report Unit :=
+  modify (·.push { node, index, message })
+
+/-- Record the failure of `check` at `node`, if it failed. -/
+private def reportError (node : IRNode) (index : Nat) (check : Except String Unit) :
+    Report Unit :=
+  match check with
+  | .error message => report node index message
+  | .ok () => pure ()
+
+/-- Phase 1: the structural invariants that every later check assumes. -/
+private def WfIRContext.structuralErrors (ctx : WfIRContext OpCode) : Array String :=
+  (if ctx.successorsHaveSameParent then #[] else
+    #["Block successors must belong to the same region as their predecessor"]) ++
+  (if ctx.graphRegionsHaveAtMostOneBlock then #[] else
+    #["Graph regions may contain at most one block"])
+
 /--
   Check the module-wide invariants needed by LLVM global references: global
   names are unique and every `llvm.mlir.addressof` names a declared global.
@@ -122,31 +260,33 @@ private def WfIRContext.graphRegionsHaveAtMostOneBlock (ctx : WfIRContext OpCode
   (function pointers, vtables, globals initialized with a function address) is
   currently rejected.
 -/
-private def WfIRContext.verifyLLVMGlobalSymbols (ctx : WfIRContext OpCode) :
-    Except String Unit := do
-  let mut globals : Std.HashMap ByteArray OperationPtr := Std.HashMap.emptyWithCapacity
-  for op in ctx.raw.operations.keys do
-    if op.getOpType! ctx.raw = .llvm .mlir__global then
-      let props := op.getProperties! ctx.raw Llvm.mlir__global
-      let symbolName := "@".toUTF8 ++ props.sym_name.value
-      if globals.contains symbolName then
-        let displayName := String.fromUTF8? symbolName |>.getD "<non-UTF8 global symbol>"
-        throw s!"llvm.mlir.global: duplicate global symbol '{displayName}'"
-      globals := globals.insert symbolName op
+private def WfIRContext.reportLLVMGlobalSymbols (ctx : WfIRContext OpCode) : Report Unit := do
+  /- Globals are visited in allocation order, which for parsed input is source
+     order, so a duplicate is reported at the later definition. -/
+  let globalOps := (ctx.raw.operations.keys.filter
+    (·.getOpType! ctx.raw = .llvm .mlir__global)).toArray.qsort (·.id < ·.id)
+  let mut globals : Std.HashMap ByteArray Unit := ∅
+  for op in globalOps do
+    let props := op.getProperties! ctx.raw Llvm.mlir__global
+    let symbolName := "@".toUTF8 ++ props.sym_name.value
+    if globals.contains symbolName then
+      let displayName := String.fromUTF8? symbolName |>.getD "<non-UTF8 global symbol>"
+      report (.operation op) 2 s!"llvm.mlir.global: duplicate global symbol '{displayName}'"
+    globals := globals.insert symbolName ()
   for op in ctx.raw.operations.keys do
     if op.getOpType! ctx.raw = .llvm .mlir__addressof then
       let props := op.getProperties! ctx.raw Llvm.mlir__addressof
       if !globals.contains props.global_name.value.toUTF8 then
-        throw s!"llvm.mlir.addressof: symbol '{props.global_name.value}' does not name an llvm.mlir.global"
+        report (.operation op) 2
+          s!"llvm.mlir.addressof: symbol '{props.global_name.value}' does not name an llvm.mlir.global"
 
 /--
   Check the whole-pattern invariants that MLIR verifies in
   `PatternOp::verifyRegions`: a `pdl.pattern` body holds only `pdl` operations,
   and contains at least one `pdl.operation`.
 -/
-private def WfIRContext.verifyPDLPatternBodies (ctx : WfIRContext OpCode) :
-    Except String Unit := do
-  let mut patternHasOperation : Std.HashMap OperationPtr Bool := Std.HashMap.emptyWithCapacity
+private def WfIRContext.reportPDLPatternBodies (ctx : WfIRContext OpCode) : Report Unit := do
+  let mut patternHasOperation : Std.HashMap OperationPtr Bool := ∅
   for op in ctx.raw.operations.keys do
     if op.getOpType! ctx.raw = .pdl .pattern then
       patternHasOperation := patternHasOperation.insert op false
@@ -157,67 +297,104 @@ private def WfIRContext.verifyPDLPatternBodies (ctx : WfIRContext OpCode) :
          terminates it both belong to the pattern. -/
       let parentType := parent.getOpType! ctx.raw
       if parentType = .pdl .pattern || parentType = .pdl .rewrite then
-        let opType := op.getOpType! ctx.raw
-        let .pdl pdlOp := opType
-          | throw s!"pdl.pattern: expected only `pdl` operations within the pattern body, but got '{String.fromUTF8! opType.name}'"
-        if pdlOp = .operation && parentType = .pdl .pattern then
-          patternHasOperation := patternHasOperation.insert parent true
+        match op.getOpType! ctx.raw with
+        | .pdl pdlOp =>
+          if pdlOp = .operation && parentType = .pdl .pattern then
+            patternHasOperation := patternHasOperation.insert parent true
+        | opType =>
+          report (.operation op) 3
+            s!"pdl.pattern: expected only `pdl` operations within the pattern body, but got '{String.fromUTF8! opType.name}'"
     | none => pure ()
-  for (_, hasOperation) in patternHasOperation.toArray do
+  for (pattern, hasOperation) in patternHasOperation.toArray do
     if !hasOperation then
-      throw "pdl.pattern: the pattern must contain at least one `pdl.operation`"
+      report (.operation pattern) 3
+        "pdl.pattern: the pattern must contain at least one `pdl.operation`"
 
 /--
-  Verify SSA dominance of operand uses.
+Phase 2: the local invariants of every operation, the terminator and
+entry-block rules of every block, LLVM global symbols, and PDL pattern bodies.
+Every operation and block in the context is checked, whether or not it is
+nested under the root.
+-/
+private def WfIRContext.localErrors (ctx : WfIRContext OpCode) : Array Diagnostic :=
+  let go : Report Unit := do
+    ctx.raw.forOpsDepM fun op opIn => do
+      let opType := op.getOpType ctx.raw opIn
+      let opName := String.fromUTF8! opType.name
+      reportError (.operation op) 0 <| Except.mapError
+        (fun msg => if opName.isEmpty || msg.startsWith opName then msg else s!"{opName}: {msg}")
+        (do
+          op.verifyLocalInvariants ctx opIn
+          match (op.get ctx.raw opIn).parent with
+          | some _ => op.verifyTerminatorPosition ctx opIn
+          | none => pure ()
+          op.verifyOperandIsolation ctx opIn)
+    ctx.raw.forBlocksDepM fun block blockIn => do
+      reportError (.block block) 1 (block.verifyTerminator ctx blockIn)
+      reportError (.block block) 1 (block.verifyNoEntryBlockPredecessors ctx blockIn)
+    ctx.reportLLVMGlobalSymbols
+    ctx.reportPDLPatternBodies
+  (go.run #[]).2
+
+/--
+  Phase 3: SSA dominance of operand uses, one diagnostic per operand that is
+  not dominated by its definition.
 
   Two kinds of operation are skipped, as in MLIR. Operations in a graph region
   are unordered with respect to their definitions, and operations in a block
   that is unreachable from its region's entry have no meaningful dominance
   relation. Nested regions of a skipped operation are still checked.
 -/
-private def WfIRContext.verifyDominance
-    (ctx : WfIRContext OpCode) (root : OperationPtr) : Except String Unit := do
-  let some dfCtx := Veir.fixpointSolve root #[DominanceAnalysis] ctx
-    | throw "dominance analysis did not reach a fixpoint"
-  ctx.raw.forOpsDepM fun op opIn => do
-    let some block := (op.get ctx.raw opIn).parent | return
-    if !block.isReachable dfCtx then return
-    let some region := (block.get! ctx.raw).parent | return
-    if !region.hasSSADominance ctx then return
-    for (value, index) in (op.getOperands ctx.raw opIn).zipIdx do
-      if !value.properlyDominatesUse op dfCtx ctx then
-        let opName := String.fromUTF8! (op.getOpType ctx.raw opIn).name
-        throw s!"{opName}: operand #{index} does not dominate this use"
+private def WfIRContext.dominanceErrors (ctx : WfIRContext OpCode) (root : OperationPtr) :
+    Array Diagnostic :=
+  match Veir.fixpointSolve root #[DominanceAnalysis] ctx with
+  | none => #[{ node := .operation root, index := 0,
+                message := "dominance analysis did not reach a fixpoint" }]
+  | some dfCtx =>
+    let go : Report Unit :=
+      ctx.raw.forOpsDepM fun op opIn => do
+        let some block := (op.get ctx.raw opIn).parent | return
+        if !block.isReachable dfCtx then return
+        let some region := (block.get! ctx.raw).parent | return
+        if !region.hasSSADominance ctx then return
+        for (value, index) in (op.getOperands ctx.raw opIn).zipIdx do
+          if !value.properlyDominatesUse op dfCtx ctx then
+            let opName := String.fromUTF8! (op.getOpType ctx.raw opIn).name
+            report (.operation op) index s!"{opName}: operand #{index} does not dominate this use"
+    (go.run #[]).2
+
+/-- The first of `errors` as a failure, or success when there are none. -/
+private def firstError (errors : Array String) : Except String Unit :=
+  if h : errors.size = 0 then .ok () else .error errors[0]
 
 public section
 
 /--
-Verify the structural invariants of the IR context, the local invariants of all
-its operations, and SSA dominance in the operation tree rooted at `root`.
+Every verification failure of the IR context, with `root` as the root
+operation, in source order: a pre-order walk of the operations and blocks
+under `root`, followed by any operation or block outside that tree.
+
+Only the first failing phase is reported, see the section comment above: with
+the structure intact, every operation, block, global symbol, and PDL pattern
+that fails its check is listed; with all of those intact, every operand whose
+definition does not dominate its use. The result is empty exactly when
+`verify` succeeds.
 -/
-def WfIRContext.verify
-    (ctx : WfIRContext OpCode) (root : OperationPtr) : Except String Unit := do
-  if !ctx.successorsHaveSameParent then
-    throw "Block successors must belong to the same region as their predecessor"
-  if !ctx.graphRegionsHaveAtMostOneBlock then
-    throw "Graph regions may contain at most one block"
-  ctx.raw.forOpsDepM (fun op opIn => do
-    let opType := op.getOpType ctx.raw opIn
-    let opName := String.fromUTF8! opType.name
-    Except.mapError
-      (fun msg => if opName.isEmpty || msg.startsWith opName then msg else s!"{opName}: {msg}")
-      (do
-        op.verifyLocalInvariants ctx opIn
-        match (op.get ctx.raw opIn).parent with
-        | some _ => op.verifyTerminatorPosition ctx opIn
-        | none => pure ()
-        op.verifyOperandIsolation ctx opIn))
-  ctx.raw.forBlocksDepM (fun block blockIn => do
-    block.verifyTerminator ctx blockIn
-    block.verifyNoEntryBlockPredecessors ctx blockIn)
-  ctx.verifyLLVMGlobalSymbols
-  ctx.verifyPDLPatternBodies
-  ctx.verifyDominance root
+def WfIRContext.verifyAll (ctx : WfIRContext OpCode) (root : OperationPtr) : Array String :=
+  let structuralFailures := ctx.structuralErrors
+  if structuralFailures = #[] then
+    let localFailures := ctx.localErrors
+    if localFailures.isEmpty then Diagnostic.messages ctx root (ctx.dominanceErrors root)
+    else Diagnostic.messages ctx root localFailures
+  else structuralFailures
+
+/--
+Verify the structural invariants of the IR context, the local invariants of all
+its operations, and SSA dominance in the operation tree rooted at `root`. On
+failure the error is the first message of `verifyAll`.
+-/
+def WfIRContext.verify (ctx : WfIRContext OpCode) (root : OperationPtr) : Except String Unit :=
+  firstError (ctx.verifyAll root)
 
 attribute [simp] OpCode.verifyLocalInvariants HasOpInfo.verifyLocalInvariants
   OperationPtr.verifyLocalInvariants
@@ -229,14 +406,34 @@ Assert that the IR context verifies successfully with `root` as the root operati
 def WfIRContext.Verified (ctx : WfIRContext OpCode) (root : OperationPtr) : Prop :=
   ctx.verify root = .ok ()
 
+private theorem firstError_ok {errors : Array String} (h : firstError errors = .ok ()) :
+    errors = #[] := by
+  unfold firstError at h
+  split at h
+  · simpa using ‹errors.size = 0›
+  · simp at h
+
+private theorem WfIRContext.structuralErrors_eq_empty {ctx : WfIRContext OpCode}
+    (h : ctx.structuralErrors = #[]) :
+    ctx.successorsHaveSameParent ∧ ctx.graphRegionsHaveAtMostOneBlock := by
+  unfold WfIRContext.structuralErrors at h
+  split at h <;> split at h <;> simp_all
+
+/-- A verified context passes both structural checks. -/
+private theorem WfIRContext.Verified.structural
+    {ctx : WfIRContext OpCode} {root : OperationPtr} (ctxVerified : ctx.Verified root) :
+    ctx.successorsHaveSameParent ∧ ctx.graphRegionsHaveAtMostOneBlock := by
+  have hempty := firstError_ok ctxVerified
+  simp only [WfIRContext.verifyAll] at hempty
+  split at hempty
+  · exact WfIRContext.structuralErrors_eq_empty ‹_›
+  · exact absurd hempty ‹_›
+
 /-- A verified context satisfies the same-parent successor check. -/
 private theorem WfIRContext.Verified.successorsHaveSameParent
     {ctx : WfIRContext OpCode} {root : OperationPtr} (ctxVerified : ctx.Verified root) :
-    ctx.successorsHaveSameParent := by
-  simp only [WfIRContext.Verified, WfIRContext.verify] at ctxVerified
-  split at ctxVerified
-  · trivial
-  · grind
+    ctx.successorsHaveSameParent :=
+  ctxVerified.structural.1
 
 /-- Every successor of a block in a verified context belongs to the block's parent region. -/
 @[grind →]
@@ -253,13 +450,8 @@ theorem WfIRContext.Verified.successor_parent
 /-- A verified context satisfies the single-block graph-region check. -/
 private theorem WfIRContext.Verified.graphRegionsHaveAtMostOneBlock
     {ctx : WfIRContext OpCode} {root : OperationPtr} (ctxVerified : ctx.Verified root) :
-    ctx.graphRegionsHaveAtMostOneBlock := by
-  simp only [WfIRContext.Verified, WfIRContext.verify] at ctxVerified
-  split at ctxVerified
-  · trivial
-  · split at ctxVerified
-    · trivial
-    · grind
+    ctx.graphRegionsHaveAtMostOneBlock :=
+  ctxVerified.structural.2
 
 /-- The first and last block of a graph region in a verified context are the same. -/
 @[grind →]

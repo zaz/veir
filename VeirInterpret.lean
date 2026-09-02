@@ -79,20 +79,20 @@ def main (args : List String) : IO Unit := do
   | [filename] =>
     match ← parseOperation filename with
     | .ok (ctx, op) =>
-      match ctx.verify op with
-      | .ok _ =>
-        let rawCtx : IRContext OpCode := ctx
-        let mainOp ← resolveEntryPoint rawCtx op
-        let result := bind (interpretFunction (ctx := ctx) mainOp #[] MemoryState.empty (by sorry))
-                           (fun (_, r) => pure r)
-        match result with
-        | .ok results => IO.println s!"Program output: {results}"
-        | .ub => IO.println "Undefined behavior"
-        | .fail =>
-          IO.eprintln "Error while interpreting module"
-          IO.Process.exit 1
-      | .error errMsg =>
-        IO.eprintln s!"Error verifying input program: {errMsg}"
+      let errors := ctx.verifyAll op
+      if !errors.isEmpty then
+        for error in errors do
+          IO.eprintln s!"Error verifying input program: {error}"
+        IO.Process.exit 1
+      let rawCtx : IRContext OpCode := ctx
+      let mainOp ← resolveEntryPoint rawCtx op
+      let result := bind (interpretFunction (ctx := ctx) mainOp #[] MemoryState.empty (by sorry))
+                         (fun (_, r) => pure r)
+      match result with
+      | .ok results => IO.println s!"Program output: {results}"
+      | .ub => IO.println "Undefined behavior"
+      | .fail =>
+        IO.eprintln "Error while interpreting module"
         IO.Process.exit 1
     | .error errMsg =>
       IO.eprintln s!"Error: {errMsg}"

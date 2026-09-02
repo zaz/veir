@@ -54,3 +54,12 @@ private def verifyCrossRegionSuccessor : Except String Unit := do
 
 #guard verifyCrossRegionSuccessor =
   .error "Block successors must belong to the same region as their predecessor"
+
+/-- `verifyAll` must stop at structural failures like `verify` does: the later
+checks (dominance in particular) assume block successors stay in their region. -/
+private def verifyAllCrossRegionSuccessor : Except String (Array String) := do
+  let (ctx, moduleOp) ← contextWithCrossRegionSuccessor
+  return ctx.verifyAll moduleOp
+
+#guard verifyAllCrossRegionSuccessor =
+  .ok #["Block successors must belong to the same region as their predecessor"]

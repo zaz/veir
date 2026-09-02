@@ -35,7 +35,7 @@ inductive IRNode where
   | operation (ptr : OperationPtr)
   | block (ptr : BlockPtr)
   | region (ptr : RegionPtr)
-deriving DecidableEq
+deriving DecidableEq, Hashable
 
 namespace IRNode
 

@@ -213,8 +213,10 @@ def main (args : List String) : IO Unit := do
       IO.Process.exit 1
     | .ok (ctx, op) =>
       if !disableVerifiers then
-        if let .error errMsg := ctx.verify op then
-          IO.eprintln s!"Error verifying input program: {errMsg}"
+        let errors := ctx.verifyAll op
+        if !errors.isEmpty then
+          for error in errors do
+            IO.eprintln s!"Error verifying input program: {error}"
           IO.Process.exit 1
       match ← passes.run ⟨ctx, by sorry⟩ op disableVerifiers with
       | .error errMsg =>
