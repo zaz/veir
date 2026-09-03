@@ -19,7 +19,7 @@ autoIncrementEnd.iLn	supported
 azExplainColNames16data	supported
 azExplainColNames8	fail
 azTempDirs	fail
-columnNullValue.nullMem	fail
+columnNullValue.nullMem	parsed
 corruptSchema.azAlterType	fail
 createTableStmt.azType	fail
 cume_distName	supported

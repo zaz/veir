@@ -18,7 +18,7 @@ azExplainColNames16data	supported
 azExplainColNames8	fail
 azTempDirs.0	parsed
 azTempDirs.1	parsed
-columnNullValue.nullMem	fail
+columnNullValue.nullMem	parsed
 corruptSchema.azAlterType.rel	fail
 createTableStmt.azType	fail
 cume_distName	supported
