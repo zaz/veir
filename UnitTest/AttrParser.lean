@@ -153,8 +153,125 @@ macro "#assert " e:term : command =>
 
 #assert expectErrorAttr "0 : 2" "integer type expected after ':' in integer attribute" (some 4)
 #assert expectSuccessAttr "0 : i32" (IntegerAttr.mk 0 (IntegerType.mk 32))
+#assert expectSuccessAttr "-5 : i32" (IntegerAttr.mk (-5) (IntegerType.mk 32))
+#assert expectSuccessAttr "0x2A : i32" (IntegerAttr.mk 42 (IntegerType.mk 32))
 #assert expectSuccessAttr "false" (IntegerAttr.mk 0 (IntegerType.mk 1))
 #assert expectSuccessAttr "true" (IntegerAttr.mk 1 (IntegerType.mk 1))
+
+/-! ## Float attributes
+
+Expected values are asserted on the bit pattern (`Float.toBits`), so that they
+are independent of the host toolchain's own float-literal parsing (which is
+1 ulp off for some literals before Lean v4.33.0, see leanprover/lean4#14110).
+The reference bits were produced with strtod (glibc), which is correctly
+rounded, matching MLIR's parse semantics for f64.
+-/
+
+/--
+  Test that `s` parses to a float attribute whose value has exactly the bits
+  `bits` and whose type has the given `width`, in both parse variants.
+-/
+def expectFloatBits (s : String) (bits : UInt64) (width : Nat := 64) : Bool :=
+  match testOptionalAttr s, testAttr s with
+  | .ok (some (.floatAttr a)), .ok (.floatAttr b) =>
+    a.value.toBits = bits && b.value.toBits = bits
+      && a.type.bitwidth = width && b.type.bitwidth = width
+  | _, _ => false
+
+#assert expectFloatBits "1.0 : f64" 0x3FF0000000000000
+#assert expectFloatBits "-1.0 : f64" 0xBFF0000000000000
+#assert expectFloatBits "3.14 : f64" 0x40091EB851EB851F
+#assert expectFloatBits "0.1 : f64" 0x3FB999999999999A
+#assert expectFloatBits "1.5e-3 : f64" 0x3F589374BC6A7EFA
+#assert expectFloatBits "2.5E+10 : f64" 0x42174876E8000000
+#assert expectFloatBits "2. : f64" 0x4000000000000000
+#assert expectFloatBits "1.e3 : f64" 0x408F400000000000
+#assert expectFloatBits "0.0 : f64" 0x0000000000000000
+#assert expectFloatBits "-0.0 : f64" 0x8000000000000000
+/- Correct rounding where Lean ≤ v4.32's own `Float.ofScientific` is 1 ulp off
+   (it yields ...714). -/
+#assert expectFloatBits "6016.951217939863 : f64" 0x40B780F38304D715
+/- Largest finite double, then overflow to infinity. -/
+#assert expectFloatBits "1.7976931348623157e308 : f64" 0x7FEFFFFFFFFFFFFF
+#assert expectFloatBits "1.0e999 : f64" 0x7FF0000000000000
+#assert expectFloatBits "-1.0e999 : f64" 0xFFF0000000000000
+/- Subnormal range: smallest subnormal, largest subnormal, underflow to zero
+   (2.47...e-324 is the exact midpoint below the smallest subnormal; ties to
+   even rounds it to zero). -/
+#assert expectFloatBits "4.9e-324 : f64" 0x0000000000000001
+#assert expectFloatBits "2.2250738585072011e-308 : f64" 0x000FFFFFFFFFFFFF
+#assert expectFloatBits "2.4703282292062327e-324 : f64" 0x0000000000000000
+#assert expectFloatBits "1.0e-999 : f64" 0x0000000000000000
+/- 2^53 + 1 is not representable; ties to even rounds it down to 2^53. -/
+#assert expectFloatBits "9007199254740993.0 : f64" 0x4340000000000000
+
+/-! ### Hexadecimal (raw bit pattern) form, as printed by MLIR for values
+without an exact short decimal form, e.g. NaN and infinity. -/
+
+#assert expectFloatBits "0x3FF0000000000000 : f64" 0x3FF0000000000000
+#assert expectFloatBits "0x0 : f64" 0x0000000000000000
+#assert expectFloatBits "0x7FF0000000000000 : f64" 0x7FF0000000000000
+#assert expectFloatBits "0xFFF0000000000000 : f64" 0xFFF0000000000000
+#assert expectFloatBits "0x7FF8000000000000 : f64" 0x7FF8000000000000
+/- Lean's runtime `Float` canonicalises NaN payloads (including the sign bit),
+   so non-canonical NaN bit patterns are not preserved, unlike MLIR's APFloat. -/
+#assert expectFloatBits "0x7FF0000000000001 : f64" 0x7FF8000000000000
+#assert expectFloatBits "0xFFF8000000000123 : f64" 0x7FF8000000000000
+
+/-! ### Float attribute printing
+
+Float attributes print as the shortest round-trip decimal (Schubfach), with
+raw-bit hex for NaN and the infinities.
+-/
+
+/-- The printed form of the float attribute with the given bit pattern. -/
+def printBits (bits : UInt64) : String :=
+  ToString.toString (FloatAttr.mk (Float.ofBits bits) (FloatType.mk 64))
+
+/-- Parse-print round trip: `s` parses to bits that print back as `s`. -/
+def expectRoundTrip (s : String) : Bool :=
+  match testOptionalAttr s with
+  | .ok (some (.floatAttr a)) => ToString.toString a = s
+  | _ => false
+
+/- Shortest round-trip form (the default printer). -/
+#assert printBits 0x3FF0000000000000 = "1.0 : f64"
+#assert printBits 0xBFF0000000000000 = "-1.0 : f64"
+#assert printBits 0x0000000000000000 = "0.0 : f64"
+#assert printBits 0x8000000000000000 = "-0.0 : f64"
+#assert printBits 0x40091EB851EB851F = "3.14 : f64"
+#assert printBits 0x3FB999999999999A = "0.1 : f64"
+#assert printBits 0x40B780F38304D715 = "6016.951217939863 : f64"
+#assert printBits 0x423CBE991A080000 = "123456789000.0 : f64"
+#assert printBits 0x7FEFFFFFFFFFFFFF = "1.7976931348623157e308 : f64"
+#assert printBits 0x0000000000000001 = "5.0e-324 : f64"
+/- Positional/scientific switch mirrors Python's repr thresholds. -/
+#assert printBits 0x3F1A36E2EB1C432D = "0.0001 : f64"
+#assert printBits 0x3EE4F8B588E368F1 = "1.0e-5 : f64"
+#assert printBits 0x430C6BF526340000 = "1000000000000000.0 : f64"
+#assert printBits 0x4341C37937E08000 = "1.0e16 : f64"
+/- NaN and the infinities print as raw bits, as in MLIR. -/
+#assert printBits 0x7FF8000000000000 = "0x7FF8000000000000 : f64"
+#assert printBits 0x7FF0000000000000 = "0x7FF0000000000000 : f64"
+#assert printBits 0xFFF0000000000000 = "0xFFF0000000000000 : f64"
+/- Print-parse round trips through the full attribute pipeline. -/
+#assert expectRoundTrip "1.0 : f64"
+#assert expectRoundTrip "-2.5 : f64"
+#assert expectRoundTrip "6016.951217939863 : f64"
+#assert expectRoundTrip "0x7FF8000000000000 : f64"
+#assert expectRoundTrip "5.0e-324 : f64"
+
+/-! ### Float attribute errors -/
+
+#assert expectErrorAttr "5 : f64"
+  "expected floating point literal; add a trailing dot to make the literal a float" (some 0)
+#assert expectErrorAttr "-0x10 : f64"
+  "hexadecimal float literal should not have a leading minus" (some 0)
+#assert expectErrorAttr "0x1FFFFFFFFFFFFFFFF : f64"
+  "hexadecimal float constant out of range for type" (some 0)
+#assert expectErrorAttr "1.0 : f16" "unsupported float type, only f64 is supported" (some 9)
+#assert expectErrorAttr "1.0 : i32" "float type expected after ':' in float attribute" (some 6)
+#assert expectErrorAttr "- : i32" "expected integer or floating-point literal after '-'" (some 2)
 
 /-! ## Integer overflow flags attributes -/
 

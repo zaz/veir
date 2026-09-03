@@ -48,7 +48,7 @@ assignAggregateRegisters	supported
 attachBackupObject	supported
 attachFunc	fail
 attachWithToSelect	parsed
-autoAdjustDate	fail
+autoAdjustDate	parsed
 autoIncBegin	fail
 autoIncStep	supported
 autoIncrementEnd	parsed
@@ -171,13 +171,13 @@ compileoptionusedFunc	parsed
 compoundHasDifferentAffinities	parsed
 computeCellSize	supported
 computeFloor	supported
-computeHMS	fail
+computeHMS	parsed
 computeIndexAffStr	parsed
-computeJD	fail
+computeJD	parsed
 computeLimitRegisters	parsed
 computeMxChoice	parsed
 computeNumericType	supported
-computeYMD	fail
+computeYMD	parsed
 computeYMD_HMS	supported
 concatFunc	fail
 concatFuncCore	fail
@@ -215,7 +215,7 @@ databaseIsUnmoved	supported
 databaseName	parsed
 dateFunc	parsed
 datetimeError	parsed
-datetimeFunc	fail
+datetimeFunc	parsed
 daysAfterJan01	parsed
 daysAfterMonday	supported
 daysAfterSunday	supported
@@ -296,7 +296,7 @@ exprNodeIsConstantOrGroupBy	parsed
 exprNodeIsDeterministic	supported
 exprNodePatternLengthEst	parsed
 exprPartidxExprLookup	parsed
-exprProbability	fail
+exprProbability	parsed
 exprRefToSrcList	parsed
 exprRowColumn	parsed
 exprSelectUsage	parsed
@@ -371,7 +371,7 @@ getCellInfo	supported
 getConstraint	supported
 getConstraintToken	parsed
 getDigits	parsed
-getDoubleArg	fail
+getDoubleArg	supported
 getFileMode	supported
 getIntArg	supported
 getLockingMode	fail
@@ -485,7 +485,7 @@ jsonCacheInsert	fail
 jsonCacheSearch	parsed
 jsonConvertTextToBlob	fail
 jsonCreateEditSubstructure	parsed
-jsonEachBestIndex	fail
+jsonEachBestIndex	parsed
 jsonEachClose	supported
 jsonEachColumn	fail
 jsonEachConnect	fail
@@ -552,8 +552,8 @@ jsonWrongNumArgs	fail
 jsonbArrayCount	parsed
 jsonbPayloadSize	supported
 jsonbValidityCheck	fail
-juliandayFunc	fail
-kahanBabuskaNeumaierInit	fail
+juliandayFunc	parsed
+kahanBabuskaNeumaierInit	parsed
 kahanBabuskaNeumaierStep	parsed
 kahanBabuskaNeumaierStepInt64	parsed
 keywordCode	parsed
@@ -753,7 +753,7 @@ pcacheSortDirtyList	parsed
 pcacheUnpin	supported
 percent_rankInvFunc	supported
 percent_rankStepFunc	parsed
-percent_rankValueFunc	fail
+percent_rankValueFunc	parsed
 populateCellCache	parsed
 posixIoFinderImpl	supported
 posixOpen	supported
@@ -761,7 +761,7 @@ posixUnlock	parsed
 powerOfTen	supported
 pragmaFunclistLine	fail
 pragmaLocate	parsed
-pragmaVtabBestIndex	fail
+pragmaVtabBestIndex	parsed
 pragmaVtabClose	supported
 pragmaVtabColumn	parsed
 pragmaVtabConnect	fail
@@ -917,12 +917,12 @@ setGetterMethod	fail
 setPageReferenced	supported
 setPendingFd	parsed
 setPragmaResultColumnNames	parsed
-setRawDateNumber	fail
+setRawDateNumber	parsed
 setResultStrOrError	supported
 setSectorSize	supported
 setSharedCacheTableLock	parsed
 setupLookaside	parsed
-signFunc	fail
+signFunc	parsed
 skipCreateTable	parsed
 sourceidFunc	parsed
 sqlite3AbsInt32	supported
@@ -952,7 +952,7 @@ sqlite3Analyze	parsed
 sqlite3ApiExit	supported
 sqlite3AppendOneUtf8Character	supported
 sqlite3ArrayAllocate	parsed
-sqlite3AtoF	fail
+sqlite3AtoF	parsed
 sqlite3Atoi	supported
 sqlite3Atoi64	parsed
 sqlite3Attach	supported
@@ -1278,7 +1278,7 @@ sqlite3FkOldmask	parsed
 sqlite3FkReferences	supported
 sqlite3FkRequired	parsed
 sqlite3ForceNotReadOnly	parsed
-sqlite3Fp10Convert2	fail
+sqlite3Fp10Convert2	supported
 sqlite3Fp2Convert10	supported
 sqlite3FpDecode	fail
 sqlite3FreeIndex	supported
@@ -1329,7 +1329,7 @@ sqlite3InitOne	fail
 sqlite3Insert	fail
 sqlite3InsertBuiltinFuncs	parsed
 sqlite3Int64ToText	parsed
-sqlite3IntFloatCompare	fail
+sqlite3IntFloatCompare	parsed
 sqlite3InvalidFunction	fail
 sqlite3InvokeBusyHandler	parsed
 sqlite3IsBinary	fail
@@ -1362,7 +1362,7 @@ sqlite3LocateTableItem	supported
 sqlite3LockAndPrepare	parsed
 sqlite3LogEst	parsed
 sqlite3LogEstAdd	supported
-sqlite3LogEstFromDouble	fail
+sqlite3LogEstFromDouble	parsed
 sqlite3LogEstToInt	supported
 sqlite3LookasideUsed	parsed
 sqlite3MPrintf	parsed
@@ -1383,8 +1383,8 @@ sqlite3MemInit	supported
 sqlite3MemJournalOpen	parsed
 sqlite3MemMalloc	fail
 sqlite3MemRealValueNoRC	supported
-sqlite3MemRealValueRC	fail
-sqlite3MemRealValueRCSlowPath	fail
+sqlite3MemRealValueRC	parsed
+sqlite3MemRealValueRCSlowPath	parsed
 sqlite3MemRealloc	fail
 sqlite3MemRoundup	supported
 sqlite3MemSetArrayInt64	supported
@@ -1419,7 +1419,7 @@ sqlite3OsAccess	supported
 sqlite3OsCheckReservedLock	supported
 sqlite3OsClose	parsed
 sqlite3OsCloseFree	supported
-sqlite3OsCurrentTimeInt64	fail
+sqlite3OsCurrentTimeInt64	parsed
 sqlite3OsDelete	parsed
 sqlite3OsDeviceCharacteristics	parsed
 sqlite3OsDlClose	supported
@@ -1575,8 +1575,8 @@ sqlite3RCStrResize	parsed
 sqlite3RCStrUnref	supported
 sqlite3ReadOnlyShadowTables	parsed
 sqlite3ReadSchema	supported
-sqlite3RealSameAsInt	fail
-sqlite3RealToI64	fail
+sqlite3RealSameAsInt	parsed
+sqlite3RealToI64	parsed
 sqlite3Realloc	parsed
 sqlite3RecordErrorByteOffset	parsed
 sqlite3RecordErrorOffsetOfExpr	parsed
@@ -1751,7 +1751,7 @@ sqlite3VdbeAddOpList	parsed
 sqlite3VdbeAddParseSchemaOp	parsed
 sqlite3VdbeAllocUnpackedRecord	parsed
 sqlite3VdbeAppendP4	supported
-sqlite3VdbeBooleanValue	fail
+sqlite3VdbeBooleanValue	parsed
 sqlite3VdbeChangeEncoding	supported
 sqlite3VdbeChangeOpcode	supported
 sqlite3VdbeChangeP1	supported
@@ -1848,7 +1848,7 @@ sqlite3VdbeOneByteSerialTypeLen	supported
 sqlite3VdbeParameterIndex	parsed
 sqlite3VdbeParser	supported
 sqlite3VdbePrepareFlags	supported
-sqlite3VdbeRealValue	fail
+sqlite3VdbeRealValue	parsed
 sqlite3VdbeRecordCompare	supported
 sqlite3VdbeRecordCompareWithSkip	parsed
 sqlite3VdbeRecordUnpack	parsed
@@ -2303,11 +2303,11 @@ tempTriggersExist	parsed
 termCanDriveIndex	supported
 termFromWhereClause	parsed
 termIsEquivalence	supported
-timeFunc	fail
+timeFunc	parsed
 timediffFunc	fail
 toLocaltime	fail
 tokenExpr	parsed
-totalFinalize	fail
+totalFinalize	parsed
 total_changes	supported
 transferJoinMarkings	parsed
 transferParseError	supported
@@ -2323,7 +2323,7 @@ unistrFunc	fail
 unixAccess	supported
 unixCheckReservedLock	parsed
 unixClose	supported
-unixCurrentTime	fail
+unixCurrentTime	parsed
 unixCurrentTimeInt64	parsed
 unixDelete	fail
 unixDeviceCharacteristics	supported
@@ -2373,7 +2373,7 @@ unixUnfetch	parsed
 unixUnlock	supported
 unixUnmapfile	parsed
 unixWrite	parsed
-unixepochFunc	fail
+unixepochFunc	parsed
 unlockBtreeIfUnused	parsed
 unlockBtreeMutex	supported
 unmapColumnIdlistNames	parsed

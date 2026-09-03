@@ -241,22 +241,22 @@ attr -N : i16	ok
 attr -N : i32	ok
 attr -N : i64	ok
 attr -N : i8	ok
-attr -N.NE+N : f64	missing
-attr -N.Ne+N : f64	missing
-attr -N.Ne-N : f64	missing
+attr -N.NE+N : f64	ok
+attr -N.Ne+N : f64	ok
+attr -N.Ne-N : f64	ok
 attr HEX : f32	missing
-attr HEX : f64	missing
+attr HEX : f64	ok
 attr N : i128	ok
 attr N : i16	ok
 attr N : i32	ok
 attr N : i4	ok
 attr N : i64	ok
 attr N : i8	ok
-attr N.N : f64	missing
-attr N.NE+N : f64	missing
+attr N.N : f64	ok
+attr N.NE+N : f64	ok
 attr N.Ne+N : f32	missing
-attr N.Ne+N : f64	missing
-attr N.Ne-N : f64	missing
+attr N.Ne+N : f64	ok
+attr N.Ne-N : f64	ok
 attr N: i1	ok
 attr N: i16	ok
 attr N: i32	ok
