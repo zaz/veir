@@ -23,6 +23,7 @@ private def volatileMemProperties : RISCVMemProperties :=
 
 #guard OpCode.getEffects (.llvm .intr__lifetime__start) (default : Unit) == .write
 #guard OpCode.getEffects (.llvm .intr__lifetime__end) (default : Unit) == .write
+#guard OpCode.getEffects (.llvm .intr__assume) (default : LLVMAssumeProperties) == .write
 
 #guard OpCode.getEffects (.arith .addi) (default : ArithIntegerOverflowFlagsProperties) == .none
 
