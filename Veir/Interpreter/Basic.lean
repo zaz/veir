@@ -1165,6 +1165,11 @@ def Llvm.interpretOp' (opType : Veir.Llvm) (properties : propertiesOf opType)
     let [val, .addr addr] := operands.toList | none
     let mem ← mem.llvmStore addr val
     return (#[], mem, none)
+  | .intr__lifetime__start | .intr__lifetime__end => do
+    -- No-ops: LLVM makes the object poison outside its live range and stores
+    -- to it UB, but `MemoryState` tracks no allocation bounds to model that.
+    let [.addr _] := operands.toList | none
+    return (#[], mem, none)
   | .getelementptr => do
     /- only supports exactly one dynamic index for now -/
     let [.addr ptr, .int _ idx] := operands.toList | none

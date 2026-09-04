@@ -50,6 +50,8 @@ inductive Llvm where
 | alloca
 | load
 | store
+| intr__lifetime__start
+| intr__lifetime__end
 | getelementptr
 | call
 | return
@@ -301,6 +303,9 @@ def Llvm.getEffects (op : Llvm) (props : Llvm.propertiesOf op) : MemoryEffects :
   | .alloca, _ => .allocate
   | .load, props => if props.volatile_ then .readWrite else .read
   | .store, props => if props.volatile_ then .readWrite else .write
+  -- LLVM gives the lifetime markers `memory(argmem: readwrite)`; they never
+  -- read, so veir narrows that to a write of the object they point to.
+  | .intr__lifetime__start, _ | .intr__lifetime__end, _ => .write
   | .mlir__constant, _ | .mlir__poison, _ | .mlir__zero, _ | .mlir__addressof, _
   | .and, _ | .or, _ | .xor, _
   | .add, _ | .sub, _ | .mul, _
@@ -359,7 +364,7 @@ def Llvm.propagatesPoison : Llvm → Bool
   | .fadd | .fsub | .fmul | .fdiv | .frem
   | .mlir__constant | .mlir__poison | .mlir__zero | .mlir__global | .mlir__addressof
   | .select | .br | .cond_br | .unreachable | .alloca | .load | .store
-  | .getelementptr | .call | .return | .func | .module_flags | .freeze => false
+  | .intr__lifetime__start | .intr__lifetime__end  | .getelementptr | .call | .return | .func | .module_flags | .freeze => false
 
 instance : IsOpCode Llvm where
   fromName := Llvm.fromName
@@ -629,6 +634,12 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
     if properties.alignment.type.bitwidth ≠ 64 then
       throw "'llvm.store' op attribute 'alignment' failed to satisfy constraint: 64-bit signless integer attribute"
     pure ()
+  | .intr__lifetime__start | .intr__lifetime__end => do
+    op.checkIsNonNullIntegerType ctx opIn
+    op.verifyPlainOpCounts ctx opIn 1 0
+    let instrName := String.fromUTF8! (IsOpCode.name (op.getOpType ctx.raw opIn))
+    ((op.getOperand! ctx.raw 0).getType! ctx.raw).verifyLlvmPointerType
+      s!"{instrName}: Expected operand 0 to have !llvm.ptr type"
   | .getelementptr => do
     op.checkIsNonNullIntegerType ctx opIn
     let props := op.getProperties! ctx.raw Llvm.getelementptr
