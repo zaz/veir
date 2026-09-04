@@ -1185,6 +1185,11 @@ def Llvm.interpretOp' (opType : Veir.Llvm) (properties : propertiesOf opType)
     let [val, .addr addr] := operands.toList | none
     let mem ← mem.llvmStore addr val
     return (#[], mem, none)
+  | .intr__assume => do
+    -- Operand bundles carry assumptions of their own (`align`, `nonnull`, ...)
+    -- that are not modelled, so only the bundle-free form is interpreted.
+    let [.int 1 cond] := operands.toList | none
+    if cond = .val 1#1 then return (#[], mem, none) else Interp.ub
   | .getelementptr => do
     /- only supports exactly one dynamic index for now -/
     let [.addr ptr, .int _ idx] := operands.toList | none
