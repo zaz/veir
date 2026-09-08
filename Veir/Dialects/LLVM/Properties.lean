@@ -751,21 +751,20 @@ def LLVMCallIntrinsicProperties.fromAttrDict (attrDict : Std.HashMap ByteArray A
            op_bundle_tags := tags, fastmathFlags := flags,
            arg_attrs := argAttrs, res_attrs := resAttrs }
 
-/--
-  Properties of `llvm.insertvalue`.
--/
-structure LLVMInsertValueProperties where
+/-- Properties of `llvm.insertvalue` and `llvm.extractvalue`. -/
+structure LLVMInsertExtractValueProperties where
   position : DenseArrayAttr
 deriving Inhabited, Repr, Hashable, DecidableEq
 
-def LLVMInsertValueProperties.fromAttrDict (attrDict : Std.HashMap ByteArray Attribute) :
-    Except String LLVMInsertValueProperties := do
+def LLVMInsertExtractValueProperties.fromAttrDictFor (opName : String)
+    (attrDict : Std.HashMap ByteArray Attribute) :
+    Except String LLVMInsertExtractValueProperties := do
   if let some (key, _) := attrDict.toArray.find? (fun (k, _) => k ≠ "position".toUTF8) then
-    throw s!"llvm.insertvalue: unexpected property '{String.fromUTF8! key}'"
+    throw s!"{opName}: unexpected property '{String.fromUTF8! key}'"
   let some position := attrDict["position".toUTF8]?
-    | throw "llvm.insertvalue: missing 'position' property"
+    | throw s!"{opName}: missing 'position' property"
   let .denseArrayAttr position := position
-    | throw s!"llvm.insertvalue: expected 'position' to be a dense array attribute, but got {position}"
+    | throw s!"{opName}: expected 'position' to be a dense array attribute, but got {position}"
   return { position }
 
 structure LLVMModuleFlagsProperties where

@@ -60,6 +60,7 @@ inductive Llvm where
 | store
 | getelementptr
 | insertvalue
+| extractvalue
 | call
 | call_intrinsic
 | return
@@ -125,7 +126,7 @@ match op with
 | .load => LoadProperties
 | .store => StoreProperties
 | .getelementptr => GetelementptrProperties
-| .insertvalue => LLVMInsertValueProperties
+| .insertvalue | .extractvalue => LLVMInsertExtractValueProperties
 | .fadd | .fsub | .fmul | .fdiv | .frem | .fneg | .intr__fmuladd | .intr__fabs =>
   FastMathFlagsProperties
 | .fcmp => FcmpProperties
@@ -168,7 +169,10 @@ def Llvm.fromAttrDict
   case load => exact LoadProperties.fromAttrDict attrDict
   case store => exact StoreProperties.fromAttrDict attrDict
   case getelementptr => exact GetelementptrProperties.fromAttrDict attrDict
-  case insertvalue => exact LLVMInsertValueProperties.fromAttrDict attrDict
+  case insertvalue =>
+    exact LLVMInsertExtractValueProperties.fromAttrDictFor "llvm.insertvalue" attrDict
+  case extractvalue =>
+    exact LLVMInsertExtractValueProperties.fromAttrDictFor "llvm.extractvalue" attrDict
   case fadd | fsub | fmul | fdiv | frem | fneg | intr__fmuladd | intr__fabs =>
     exact FastMathFlagsProperties.fromAttrDict attrDict
   case fcmp => exact FcmpProperties.fromAttrDict attrDict
@@ -343,7 +347,7 @@ def Llvm.toAttrDict
     dict := dict.insert "noalias_scopes".toUTF8 (.arrayAttr props.noalias_scopes)
     dict := dict.insert "tbaa".toUTF8 (.arrayAttr props.tbaa)
     dict
-  | .insertvalue =>
+  | .insertvalue | .extractvalue =>
     (Std.HashMap.emptyWithCapacity 1).insert
       "position".toUTF8 (Attribute.denseArrayAttr props.position)
   | .getelementptr => Id.run do
@@ -400,7 +404,7 @@ def Llvm.getEffects (op : Llvm) (props : Llvm.propertiesOf op) : MemoryEffects :
   | .intr__fshl, _ | .intr__fshr, _
   | .icmp, _ | .select, _
   | .trunc, _ | .sext, _ | .zext, _
-  | .getelementptr, _ | .insertvalue, _
+  | .getelementptr, _ | .insertvalue, _ | .extractvalue, _
   | .br, _ | .cond_br, _ | .switch, _ | .return, _
   | .freeze, _ | .bitcast, _
   | .inttoptr, _ | .ptrtoint, _
@@ -440,7 +444,7 @@ def Llvm.isTerminator (op : Llvm) : Bool :=
 def Llvm.propagatesPoison : Llvm → Bool
   | .and | .or | .xor | .add | .sub | .mul | .sdiv | .udiv | .srem | .urem
   | .shl | .lshr | .ashr | .icmp | .trunc | .sext | .zext | .bitcast
-  | .inttoptr | .ptrtoint
+  | .inttoptr | .ptrtoint | .extractvalue
   | .intr__ctlz | .intr__cttz | .intr__ctpop | .intr__bswap
   | .intr__bitreverse | .intr__fshl | .intr__fshr
   | .intr__smax | .intr__smin | .intr__umax | .intr__umin | .intr__abs
@@ -837,15 +841,22 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
     if properties.alignment.type.bitwidth ≠ 64 then
       throw "'llvm.store' op attribute 'alignment' failed to satisfy constraint: 64-bit signless integer attribute"
     pure ()
-  | .insertvalue => do
+  | .insertvalue | .extractvalue => do
     op.checkIsNonNullIntegerType ctx opIn
-    op.verifyPlainOpCounts ctx opIn 2 1
-    let props := op.getProperties! ctx.raw Llvm.insertvalue
+    let isInsert := opType == .insertvalue
+    op.verifyPlainOpCounts ctx opIn (if isInsert then 2 else 1) 1
+    if !isInsert then
+      op.verifyLLVMCompatibleTypes ctx opIn
+    let props := if isInsert then op.getProperties! ctx.raw Llvm.insertvalue
+      else op.getProperties! ctx.raw Llvm.extractvalue
     if props.position.elementType.bitwidth ≠ 64 then
       throw "Expected 'position' to be an i64 dense array attribute"
     let containerType := (op.getOperand! ctx.raw 0).getType! ctx.raw
-    let valueType := (op.getOperand! ctx.raw 1).getType! ctx.raw
-    op.verifyResultTypeMatches ctx containerType "Expected the result to have the container type"
+    let valueType ← if isInsert then do
+      op.verifyResultTypeMatches ctx containerType "Expected the result to have the container type"
+      pure ((op.getOperand! ctx.raw 1).getType! ctx.raw)
+    else
+      pure (((op.getResult 0).get! ctx.raw).type)
     let isStruct : Attribute → Bool
       | .unregisteredAttr attr => attr.isType && attr.value.startsWith "!llvm.struct"
       | _ => false
@@ -868,7 +879,11 @@ def Llvm.verifyLocalInvariants {OpInfo : Type} [IsOpCode OpInfo]
         throw s!"position out of bounds: {index}"
       current := arrType.type
     if current ≠ valueType.val then
-      throw s!"Type mismatch: cannot insert {valueType} into {containerType}"
+      if isInsert then
+        throw s!"Type mismatch: cannot insert {valueType} into {containerType}"
+      else
+        throw s!"Type mismatch: extracting from {containerType} should produce \
+          {current} but this op returns {valueType}"
   | .getelementptr => do
     op.checkIsNonNullIntegerType ctx opIn
     let props := op.getProperties! ctx.raw Llvm.getelementptr
