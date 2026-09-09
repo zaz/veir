@@ -131,7 +131,8 @@ def parseOptionalFloatType : AttrParserM (Option FloatType) := do
 
 /--
   Parse an optional byte type.
-  A byte type is represented as `!llvm.byte<bitwidth>` where bitwidth is a positive integer.
+  A byte type is represented as `!llvm.byte<bitwidth>` where bitwidth is a positive integer
+  below 2^23, as in MLIR's `LLVMByteType::verify`.
 -/
 def parseOptionalByteType : AttrParserM (Option LLVM.ByteType) := do
   let token ← peekToken
@@ -141,7 +142,12 @@ def parseOptionalByteType : AttrParserM (Option LLVM.ByteType) := do
   if typeName ≠ "llvm.byte".toByteArray then return none
   let _ ← consumeToken
   parsePunctuation "<"
+  let widthToken ← peekToken
   let bitwidth ← parseInteger false false
+  if bitwidth = 0 then
+    throwAt widthToken.slice.start "bitwidth must be greater than 0"
+  if bitwidth ≥ 2 ^ 23 then
+    throwAt widthToken.slice.start s!"bitwidth must be less than {2 ^ 23}, but got {bitwidth}"
   parsePunctuation ">"
   return some (LLVM.ByteType.mk bitwidth.toNat)
 
