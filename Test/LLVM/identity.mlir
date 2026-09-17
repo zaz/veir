@@ -174,7 +174,7 @@
 // CHECK-NEXT:       %{{.*}} = "llvm.fptosi"(%arg7_0) : (f64) -> i32
 // CHECK-NEXT:       %{{.*}} = "llvm.intr.fabs"(%arg7_0) <{"fastmathFlags" = #llvm.fastmath<none>}> : (f64) -> f64
 // CHECK-NEXT:       %{{.*}} = "llvm.fptoui"(%arg7_0) : (f64) -> i32
-// CHECK-NEXT:       %{{.*}} = "llvm.mlir.constant"() <{"value" = 0x3f800000 : f32}> : () -> f32
+// CHECK-NEXT:       %{{.*}} = "llvm.mlir.constant"() <{"value" = 1.000000e+00 : f32}> : () -> f32
 // CHECK-NEXT:       %{{.*}} = "llvm.fpext"(%{{.*}}) : (f32) -> f64
 // CHECK-NEXT:       %{{.*}} = "llvm.freeze"(%{{.*}}) : (i32) -> i32
 // CHECK-NEXT:       %{{.*}} = "llvm.mlir.poison"() : () -> i64

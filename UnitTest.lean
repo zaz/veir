@@ -3,6 +3,7 @@ import UnitTest.Deriving
 import UnitTest.ParserError
 import UnitTest.Parser
 import UnitTest.AttrParser
+import UnitTest.FloatPrinter
 import UnitTest.MlirParser
 import UnitTest.IR.Operation
 import UnitTest.Dialect

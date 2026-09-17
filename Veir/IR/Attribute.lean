@@ -889,11 +889,7 @@ instance : ToString IntegerAttr where
   toString attr := s!"{attr.value} : {attr.type}"
 
 instance : ToString FloatAttr where
-  toString attr :=
-  -- Of the form 0x<bits>#<bitwidth>, e.g. 0xff#8
-  let str := s!"{attr.value}"
-  let front := (str.split '#').toArray.getD 0 ""
-  s!"{front} : {attr.type}"
+  toString attr := s!"{attr.value.toMLIRString} : {attr.type}"
 
 instance : ToString RegisterType where
   toString type :=
